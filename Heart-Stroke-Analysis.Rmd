@@ -1,0 +1,851 @@
+---
+title: "Homework 5"
+author: "RakeshDR"
+date: "2023-11-12"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+# Importing all the required Libraries 
+
+```{r}
+
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+
+library(caret)
+library(rpart)
+library(tidyverse)
+library(ggplot2)
+library(rattle)
+library(dplyr)
+library(e1071)
+library(stats)
+library(factoextra)
+library(kknn)
+library(MASS)
+library(cluster)
+library(pROC)
+library(doParallel)
+
+```
+
+## a. Data Gathering and Integration 
+
+I am using the heart stroke data-set for this homework assignment 5 which I downloaded from the Kaggle data portal
+
+This data is used to predict whether a patient is likely to get a stroke based on the input parameters like gender, age, heart conditions like hyper-tension, heart disease, glucose level in blood and smoking status
+
+This data-set contains both categorical and numerical data. And attributes of the data-set are listed below -
+
+ 1. id: unique identifier
+ 2. gender: "Male", "Female" or "Other"
+ 3. age: age of the patient
+ 4. hypertension: 0 if the patient doesn't have hypertension, 1 if the patient has hypertension
+ 5. heart_disease: 0 if the patient doesn't have any heart diseases, 1 if the patient has a heart disease
+ 6. ever_married: "No" or "Yes"
+ 7. work_type: "children", "Govt_jov", "Never_worked", "Private" or "Self-employed"
+ 8. Residence_type: "Rural" or "Urban"
+ 9. avg_glucose_level: average glucose level in blood
+10. bmi: body mass index
+11. smoking_status: "formerly smoked", "never smoked", "smokes" or "Unknown"*
+12. stroke: 1 if the patient had a stroke or 0 if not
+
+```{r }
+
+# Loading Stroke Data from CSV File
+stroke_data_raw <- read.csv("C:/Users/harsh/Downloads/Fundamentals of DataScience/healthcare-dataset-stroke-data.csv")
+
+# Creating a Data Frame for Stroke Analysis
+stroke_analysis_df <- stroke_data_raw
+
+# Previewing the Top Six Records of the Data Frame
+head(stroke_analysis_df)
+
+```
+
+Removing the unique identifier - id
+
+```{r}
+
+# Excluding the ID Column for Data Anonymization
+stroke_analysis_df <- stroke_analysis_df %>% dplyr::select(-c(id))
+
+```
+
+Missing values - Checking for NA/missing values using the summary function 
+
+```{r}
+
+# Generating a Statistical Summary of the Stroke Data to fing missing values
+summary(stroke_analysis_df)
+
+```
+
+Looking at the summary function we conclude that all the numerical variables are clean and ready for further step
+
+Checking for missing values in categorical data -
+
+```{r}
+
+# Identifying Unique Genders in the Dataset
+unique(stroke_analysis_df$gender)
+
+# Listing Distinct Marital Status Entries
+unique(stroke_analysis_df$ever_married)
+
+# Enumerating Various Types of Employment
+unique(stroke_analysis_df$work_type)
+
+# Categorizing by Residence Type
+unique(stroke_analysis_df$Residence_type)
+
+# Exploring Different Smoking Statuses Recorded
+unique(stroke_analysis_df$smoking_status)
+
+
+```
+
+We notice that there are no missing values in categorical data
+
+Checking for missing values of BMI
+
+```{r}
+
+unique(stroke_analysis_df$bmi)
+
+```
+
+We notice some missing values for BMI 
+
+We will deal with the missing values by replacing the N/A values with 0
+
+```{r}
+
+# Transforming BMI to Numeric Format for Analysis
+stroke_analysis_df$bmi <- as.numeric(stroke_analysis_df$bmi)
+
+# Substituting Missing BMI Values with Zero
+stroke_analysis_df <- stroke_analysis_df %>% mutate(bmi = ifelse(is.na(bmi), 0, bmi))
+
+# Verifying the Replacement of NAs in BMI by Reviewing the Data Summary
+summary(stroke_analysis_df)
+
+```
+
+Outliers-
+
+Checking for outliers in numerical variables -
+
+No outliers were found
+
+```{r}
+
+# Creating a Histogram to Visualize Age Distribution
+hist(stroke_analysis_df$age)
+
+# Plotting a Histogram for Hypertension Prevalence
+hist(stroke_analysis_df$hypertension)
+
+# Histogram of Heart Disease Incidence in the Dataset
+hist(stroke_analysis_df$heart_disease)
+
+# Visualizing Stroke Occurrences with a Histogram
+hist(stroke_analysis_df$stroke)
+
+# BMI Distribution Among Participants: A Histogram Analysis
+hist(stroke_analysis_df$bmi)
+
+# Histogram Depicting Average Glucose Level Variations
+hist(stroke_analysis_df$avg_glucose_level)
+
+
+```
+
+Checking for outliers in categorical variables -
+
+```{r}
+
+# Assessing Potential Outliers in Categorical Variables
+unique(stroke_analysis_df$gender)
+unique(stroke_analysis_df$ever_married)
+unique(stroke_analysis_df$work_type)
+unique(stroke_analysis_df$Residence_type)
+unique(stroke_analysis_df$smoking_status)
+
+
+```
+
+We notice outliers - "other" and "unknown" in gender and smoking_status
+
+Dealing with the outliers -
+
+```{r}
+
+# Analyzing Frequency Counts to Identify Outliers in Gender and Smoking Status
+table(stroke_analysis_df$gender)
+table(stroke_analysis_df$smoking_status)
+
+```
+
+We see that there are 1544 unknown values for smoking_status, which I am deciding to keep as removing this would mean losing a lot of data, which could lead to heavy imbalance in the dataset
+We see that there is only 1 outlier - other in gender so we will remove it  
+
+```{r}
+
+# Filtering Out 'Other' Category from Gender to Remove Outliers
+stroke_analysis_df <- stroke_analysis_df %>% filter(gender != "Other")
+
+# Confirming Removal by Displaying Unique Gender Values
+unique(stroke_analysis_df$gender)
+
+
+```
+
+## b. Data Exploration
+
+Before looking at the visualizations, I will be converting the categorical variables into factors 
+
+```{r}
+
+# Transforming Gender Variable to a Factor for Analysis
+stroke_analysis_df$gender <- as.factor(stroke_analysis_df$gender)
+
+# Converting Marital Status to Factor Type
+stroke_analysis_df$ever_married <- as.factor(stroke_analysis_df$ever_married)
+
+# Changing Work Type to Factor for Categorical Analysis
+stroke_analysis_df$work_type <- as.factor(stroke_analysis_df$work_type)
+
+# Updating Residence Type to Factor Format
+stroke_analysis_df$Residence_type <- as.factor(stroke_analysis_df$Residence_type)
+
+# Converting Smoking Status to Factor for Detailed Examination
+stroke_analysis_df$smoking_status <- as.factor(stroke_analysis_df$smoking_status)
+
+
+```
+
+Let's look at the number of different factors of all the categorical variables -
+
+```{r}
+
+# Counting the Number of Entries by Gender
+stroke_analysis_df %>% 
+  group_by(gender) %>%
+  summarise("count" = n())
+
+# Calculating the Total Count for Each Marital Status Category
+stroke_analysis_df %>% 
+  group_by(ever_married) %>%
+  summarise("count" = n())  
+
+# Summarizing the Dataset by Different Work Types
+stroke_analysis_df %>% 
+  group_by(work_type) %>%
+  summarise("count" = n())
+
+# Grouping and Counting Entries Based on Residence Type
+stroke_analysis_df %>% 
+  group_by(Residence_type) %>%
+  summarise("count" = n())  
+
+# Analyzing the Distribution of Smoking Status Among Participants
+stroke_analysis_df %>% 
+  group_by(smoking_status) %>%
+  summarise("count" = n())  
+
+```
+
+We can do the same by using the summary function -
+
+```{r}
+
+# Generating Summary Statistics for Gender Distribution
+summary(stroke_analysis_df$gender)
+
+# Overview of Marital Status Data
+summary(stroke_analysis_df$ever_married)
+
+# Summarizing Work Type Categories in the Dataset
+summary(stroke_analysis_df$work_type)
+
+# Analyzing Residence Type Distribution
+summary(stroke_analysis_df$Residence_type)
+
+# Summary of Smoking Status Among Participants
+summary(stroke_analysis_df$smoking_status)
+
+
+```
+
+We get some important information about our dataset -
+
+We learned about the diversity of genders present in the dataset, noting a balanced representation, which is favorable. The data revealed a predominance of married individuals compared to those who are not married. In terms of employment, a significant portion of the sample consists of individuals working in the private sector. The dataset also shows an equal distribution of urban and rural residents. Regarding smoking status, it was observed that many participants have never smoked, a positive aspect. There are also a notable number of unknown values in this category; however, we decided to retain them to avoid a substantial imbalance in the dataset.
+
+Visualization -
+
+Let's look at visualizations for the numerical variables -
+
+```{r}
+
+# Plotting a Histogram to Visualize the Age Distribution
+hist(stroke_analysis_df$age)
+
+# Histogram Showing Distribution of Hypertension Cases
+hist(stroke_analysis_df$hypertension)
+
+# Visualizing Heart Disease Incidence with a Histogram
+hist(stroke_analysis_df$heart_disease)
+
+# Histogram Analysis of Stroke Incidence
+hist(stroke_analysis_df$stroke)
+
+# BMI Distribution Visualized Through a Histogram
+hist(stroke_analysis_df$bmi)
+
+# Analyzing Average Glucose Level Distribution via Histogram
+hist(stroke_analysis_df$avg_glucose_level)
+
+
+```
+
+We have looked at these visualizations before,
+
+Examining the age histogram reveals a varied age distribution within the dataset. The hypertension histogram indicates that hypertension is relatively uncommon among the participants. Similarly, the histogram for heart disease suggests that few individuals in the sample have a history of heart disease. A significant imbalance is observed in the target variable, stroke, suggesting that sensitivity/recall should be a primary focus for assessing the model's reliability. The BMI histogram displays a broad range of values, indicating good diversity. Lastly, the histogram for glucose levels also shows a broad spectrum of values. 
+
+Let's look at some visualizations between variables -
+
+```{r}
+
+# Bar Chart Comparing Gender Distribution with Stroke Incidence
+ggplot(stroke_analysis_df, aes(x=gender, fill=as.factor(stroke))) + 
+  geom_bar(aes(y=after_stat(count)))
+
+# Bar Chart Showing Relationship Between Hypertension and Stroke
+ggplot(stroke_analysis_df, aes(x=as.factor(hypertension), fill=as.factor(stroke))) + 
+  geom_bar(aes(y=after_stat(count)))
+
+# Analyzing the Link Between Smoking Status and Stroke Through a Bar Chart
+ggplot(stroke_analysis_df, aes(x=smoking_status, fill=as.factor(stroke))) + 
+  geom_bar(aes(y=after_stat(count)))
+
+# Exploring the Impact of Work Type on Stroke Occurrence with a Bar Chart
+ggplot(stroke_analysis_df, aes(x=work_type, fill=as.factor(stroke))) + 
+  geom_bar(aes(y=after_stat(count)))
+
+
+```
+
+Despite some challenges in interpretation due to significant imbalances, the following insights were gleaned from the visualizations:
+
+- Analyzing the bar graph correlating gender with stroke incidence reveals that gender does not significantly influence stroke prediction.
+- The relationship between hypertension and stroke appears more pronounced, suggesting a potential link between the two.
+- The analysis of smoking status indicates a surprisingly higher likelihood of stroke among individuals who have never smoked.
+- Observations from the work type graph show that individuals employed in the private sector seem to have a higher risk of experiencing a stroke.
+
+## c. Data Cleaning
+
+Missing Values -
+
+Let's look at the summary statistics of our data 
+
+```{r}
+
+# Generating a Comprehensive Summary of the Stroke Dataset
+summary(stroke_analysis_df)
+
+
+```
+
+The dataset's comprehensive review through the summary function confirms that it is currently free of missing values. Earlier, there were some missing values in the BMI data, which have been addressed by substituting them with 0.
+
+Transforming Variables -
+
+Let's look at the datatypes of our dataset
+
+```{r}
+
+# Displaying Data Structure and Types of Each Column in the Dataset 
+str(stroke_analysis_df)
+
+
+```
+
+The majority of the categorical variables in the dataset have already been transformed for visualization purposes. Next, we plan to also convert the 'hypertension' and 'heart_disease' variables into factors. However, at this stage, we will not be converting the 'stroke' variable into a factor.
+
+```{r}
+
+# Creating a Cleaned Version of the Stroke Data Frame
+stroke_data_cleaned <- stroke_analysis_df
+
+# Converting 'Hypertension' Column to Factor for Categorical Analysis
+stroke_data_cleaned$hypertension <- as.factor(stroke_data_cleaned$hypertension)
+
+# Changing 'Heart Disease' Column to Factor Type
+stroke_data_cleaned$heart_disease <- as.factor(stroke_data_cleaned$heart_disease)
+
+
+```
+
+Outliers -
+
+We previously conducted an outlier analysis and identified outliers in the 'gender' and 'smoking_status' variables. To address this, we removed the outliers in the 'gender' category from the dataset. However, we decided to retain the outliers in 'smoking_status', as eliminating them would lead to a significant imbalance in the dataset. Apart from those in 'smoking_status', the dataset was found to be free of outliers.
+
+```{r}
+
+# Evaluating Unique Values in Categorical Columns to Identify Outliers
+unique(stroke_data_cleaned$gender)
+unique(stroke_data_cleaned$hypertension)
+unique(stroke_data_cleaned$heart_disease)
+unique(stroke_data_cleaned$ever_married)
+unique(stroke_data_cleaned$work_type)
+unique(stroke_data_cleaned$Residence_type)
+unique(stroke_data_cleaned$smoking_status)
+
+```
+
+We have confirmed that are data is clean enough to move forward
+
+## d. Data Preprocessing
+
+Dummy Variables -
+
+Converting the categorical variables into dummy variables -
+
+```{r}
+
+# Creating Dummy Variables for All Categorical Columns
+dummy_model <- dummyVars(~., data = stroke_data_cleaned)
+
+# Applying the Dummy Variable Transformation to the Dataset
+stroke_data_dummies <- as.data.frame(predict(dummy_model, newdata = stroke_data_cleaned))
+
+# Generating a Summary of the Transformed Data with Dummy Variables
+summary(stroke_data_dummies)
+
+
+```
+
+We add dummy variables as the algorithms perform better with numerical variables
+
+Normalization:
+
+In this dataset, there's no requirement for binning or smoothing techniques.
+
+Normalizing the data is beneficial as it ensures that all data points are scaled to a similar range, enhancing the consistency of the dataset.
+
+Standardization:
+
+This technique involves adjusting all features so that they are centered around zero, typically resulting in each feature having approximately unit variance. This standardization helps in balancing the scale of different variables, which is particularly important for many machine learning algorithms.
+
+```{r}
+
+# Setting a Random Seed for Reproducibility in Data Processing
+set.seed(456)
+
+# Excluding the Target Variable for Preprocessing
+stroke_data_no_target <- stroke_data_dummies[,-c(23)]
+
+# Standardizing Data: Centering and Scaling
+data_preprocessor <- preProcess(stroke_data_no_target, method = c("center", "scale"))
+
+# Applying Standardization to the Dataset
+stroke_data_standardized <- predict(data_preprocessor, stroke_data_no_target)
+
+# Reviewing the Summary of the Standardized Dataset
+summary(stroke_data_standardized)
+
+
+```
+
+## e. Clustering
+
+We plan to employ K-Means Clustering on our dataset, known as "stroke_data_standardized." This particular dataset is composed solely of predictor variables and does not include any class labels. It has undergone normalization, making it well-suited for clustering applications. Additionally, all categorical variables within the dataset have been transformed into dummy variables.
+
+An essential prerequisite of K-Means clustering is pre-defining the number of clusters (k). To ascertain the optimal k value, we'll utilize two different methodologies. These methods will aid in identifying the most effective number of clusters for our analysis.
+
+Determining the number of clusters -
+
+1. Finding the knee
+
+```{r}
+
+# Determining Optimal Number of Clusters Using the Elbow Method (Within-Sum-of-Squares)
+fviz_nbclust(stroke_data_standardized, kmeans, method = "wss")
+
+
+```
+
+We observe that K = 2 and K = 3 represents the last non-flat slope 
+The other option is comparing the average silhouette scores of different K values
+This technique is more straightforward because we will just be looking at the highest value 
+
+2. Silhouette 
+
+```{r}
+
+# Identifying the Optimal Number of Clusters Using the Silhouette Method
+fviz_nbclust(stroke_data_standardized, kmeans, method = "silhouette")
+
+
+```
+
+The silhouette score suggests a K value of 10 
+Comparing both knee and silhouette suggestions, I will be using K = 3
+
+Using K-means to fit the data with a k value of 3
+
+```{r}
+
+# Fitting a K-Means Model with 3 Centers to the Standardized Data
+kmeans_fit <- kmeans(stroke_data_standardized, centers = 3, nstart = 25)
+
+# Displaying the Details of the Fitted K-Means Model
+kmeans_fit
+
+
+```
+
+To understand the output we can visualize the data
+
+Visualization of clusters -
+
+```{r}
+
+# Visualizing Cluster Groups from the K-Means Model on the Standardized Data
+fviz_cluster(kmeans_fit, data = stroke_data_standardized)
+
+
+```
+
+Visualizing clustering results by making a PCA projection -
+
+Comparing by generating a PCA plot and coloring the points by cluster assignment
+
+```{r}
+
+# Performing Principal Component Analysis (PCA) on the Standardized Data
+pca_result <- prcomp(stroke_data_standardized)
+
+# Converting PCA Results into a Data Frame
+pca_data_frame <- as.data.frame(pca_result$x)
+
+# Adding the Cluster Assignments as a New Column
+pca_data_frame$Clusters <- as.factor(kmeans_fit$cluster)
+
+# Creating a Scatter Plot to Visualize PCA Results with Cluster Groupings
+ggplot(data = pca_data_frame, aes(x = PC1, y = PC2, color = Clusters)) + geom_point(alpha=0.5)
+
+```
+
+Comparing by generating a PCA plot and coloring the points by class labels 
+
+```{r}
+
+# Incorporating Original Stroke Labels into the PCA Data Frame for Reference
+pca_data_frame$StrokeLabel <- as.factor(stroke_data_dummies$stroke)
+
+# Creating a Scatter Plot to Visualize PCA Results Highlighting Stroke Labels
+ggplot(data = pca_data_frame, aes(x = PC1, y = PC2, color = StrokeLabel)) + geom_point(alpha=0.5)
+
+
+```
+
+Upon examining the cluster visualizations generated by the K-means algorithm, it's evident that this clustering method effectively groups the data in a manner that aligns closely with our actual class labels. Notably, the algorithm has formed three distinct clusters, which ideally would match three class labels. However, our dataset comprises only two class labels.
+
+## f. Classification
+
+I will be using - SVM and KNN as my classifiers
+
+1. KNN
+
+Utilizing the stroke_data dataset, which has already undergone normalization/scaling and includes dummy variables for its categorical elements, we'll apply two distinct distance metrics to determine the optimal k value. These distance metrics are the Manhattan and Euclidean distances. Additionally, we plan to reintroduce class labels into the dataset, a step necessary for the development of classification models.
+
+a. Manhattan distance -
+
+The range for K was given as 3 to 10 and the distance function which was used was Manhattan
+The best value reported for K is 10 and the kernel used was cos
+The algorithm reported an accuracy of 95%
+
+```{r}
+
+# Reintroducing Stroke Class Labels into the Normalized Dataset
+stroke_data_standardized$stroke <- stroke_data_dummies$stroke
+
+# Converting the Stroke Variable to a Factor for Classification
+stroke_data_standardized$stroke <- as.factor(stroke_data_standardized$stroke)
+
+# Setting a Seed for Reproducible Results in Model Training
+set.seed(456)
+
+# Configuring 10-Fold Cross-Validation for Model Training
+cross_val_control <- trainControl(method = "cv", number = 10, allowParallel = TRUE)
+
+# Defining the Tuning Grid for Hyperparameter Optimization
+tuning_parameters <- expand.grid(kmax = 3:10,                 # Testing k values from 3 to 10
+                                 kernel = c("rectangular", "cos"),
+                                 distance = 1)                # Using Manhattan distance
+
+# Training the K-Nearest Neighbors Model with Manhattan Distance
+kknn_model <- train(stroke ~ .,
+                    data = stroke_data_standardized,
+                    method = 'kknn',
+                    trControl = cross_val_control,
+                    tuneGrid = tuning_parameters)
+
+# Outputting the Trained K-Nearest Neighbors Model
+kknn_model
+
+
+```
+
+b. Euclidean Distance -
+
+The range for K was given as 3 to 10 and the distance function which was used was Euclidean
+The best value reported for K is 10 and the kernel used was rectangular
+The algorithm reported an accuracy of 94%
+
+```{r}
+
+# Setting a Seed for Consistent Results in Model Training
+set.seed(456)
+
+# Configuring 10-Fold Cross-Validation for the Training Process
+cross_validation_control <- trainControl(method = "cv", number = 10, allowParallel = TRUE)
+
+# Creating a Tuning Grid for Hyperparameter Optimization
+# Testing k values from 3 to 10, using Euclidean distance
+hyperparameter_grid <- expand.grid(kmax = 3:10,               
+                                   kernel = c("rectangular", "cos"),
+                                   distance = 2)           
+
+# Training the K-Nearest Neighbors Model with Euclidean Distance
+kknn_model_euclidean <- train(stroke ~ .,
+                              data = stroke_data_standardized,
+                              method = 'kknn',
+                              trControl = cross_validation_control,
+                              tuneGrid = hyperparameter_grid)
+
+# Outputting the Details of the Trained KNN Model
+kknn_model_euclidean
+
+```
+
+In summary, the accuracy levels achieved by both algorithms, each utilizing a different distance function, were nearly identical. I have decided to opt for the algorithm that employs the Manhattan distance function, which demonstrated an impressive accuracy of 95%. Moving forward, we will proceed to create a confusion matrix for the K-Nearest Neighbors (KNN) model that uses the Manhattan distance.
+
+Generating the confusion matrix for KNN with Manhattan Distance -
+
+```{r}
+
+# Generating Predictions Using the K-Nearest Neighbors Model
+predicted_knn <- predict(kknn_model, stroke_data_standardized)
+
+# Creating a Confusion Matrix to Evaluate Model Performance
+confusionMatrix(stroke_data_standardized$stroke, predicted_knn)
+
+```
+
+After looking at the confusion matrix we understand that the algorithm does a good job at classifying true negatives but struggles to classify true positives
+
+2. SVM
+
+We will tune the parameters using Grid Search and then fit our model
+
+```{r}
+
+# Setting a Seed for Consistent Model Training Results
+set.seed(456)
+
+# Configuring 10-Fold Cross-Validation for the SVM Model Training
+cross_validation_control_svm <- trainControl(method = "cv", number = 10, allowParallel = TRUE)
+
+# Defining a Grid for Tuning the 'C' Parameter in SVM
+tuning_grid_svm <- expand.grid(C = 10^seq(-5, 2, 0.5))
+
+# Training the Support Vector Machine (SVM) Model with Linear Kernel
+svm_model <- train(stroke ~ .,
+                   data = stroke_data_standardized,
+                   method = "svmLinear",
+                   trControl = cross_validation_control_svm,
+                   tuneGrid = tuning_grid_svm)
+
+# Outputting the Details of the Trained SVM Model
+svm_model
+
+
+```
+
+After running the model, we observe that the accuracy with SVM is 95%
+
+Generating a confusion matrix fo SVM -
+
+```{r}
+
+# Generating Predictions with the SVM Model
+predicted_svm <- predict(svm_model, stroke_data_standardized)
+
+# Creating a Confusion Matrix to Evaluate the SVM Model
+confusionMatrix(stroke_data_standardized$stroke, predicted_svm)
+
+
+```
+
+Upon examining the confusion matrix for the SVM (Support Vector Machine) model, it becomes evident that SVM is not particularly effective in this classification task. It primarily classifies patients as not having had a stroke, failing to accurately classify those who have had a stroke.
+
+While both SVM and KNN (K-Nearest Neighbors) models report an accuracy rate of 95%, this metric alone can be misleading. A closer analysis, particularly of the confusion matrices for both classifiers, reveals that KNN performs more effectively in terms of classification. Therefore, KNN emerges as the more suitable classifier for this model, demonstrating superior performance in distinguishing between the different classes.
+
+## g. Evaluation 
+
+We concluded that KNN is a better classifier for this dataset so we will be using that for further advanced evaluations 
+
+Creating a 70-30 train test split 
+
+```{r}
+
+# Initializing a Seed for Reproducible Data Partitioning
+set.seed(456)
+
+# Creating Indices for Data Partitioning Based on Stroke Label
+partition_indices <- createDataPartition(y = stroke_data_standardized$stroke, p = 0.7, list = FALSE)
+
+# Creating the Training Dataset Using the Specified Indices
+training_data <- stroke_data_standardized[partition_indices, ]
+
+# Forming the Test Dataset Excluding the Training Data Indices
+testing_data <- stroke_data_standardized[-partition_indices, ]
+
+
+```
+
+Building a KNN model using train dataset
+
+```{r}
+
+# Setting a Seed for Consistent Results in KNN Model Training
+set.seed(456)
+
+# Configuring 10-Fold Cross-Validation for KNN Training
+cross_validation_control_knn <- trainControl(method = "cv", number = 10, allowParallel = TRUE)
+
+# Training the K-Nearest Neighbors (KNN) Model on the Training Data
+knn_model <- train(stroke ~ .,
+                   data = training_data,
+                   method = "knn",
+                   trControl = cross_validation_control_knn,
+                   tuneLength = 20)
+
+# Outputting the Details of the Trained KNN Model
+knn_model
+
+
+```
+
+We see that the best accuracy of the model is with k=43 and the reported accuracy is 95%
+
+1. Confusion Matrix -
+
+```{r}
+
+# Predicting Stroke Labels on the Test Dataset Using the Trained KNN Model
+predictions_knn_test <- predict(knn_model, testing_data)
+
+# Creating a Confusion Matrix to Evaluate the KNN Model's Performance
+confusion_matrix_knn <- confusionMatrix(testing_data$stroke, predictions_knn_test)
+
+# Displaying the Confusion Matrix for the KNN Model
+confusion_matrix_knn
+
+```
+
+We notice that the model performs worse with train data as it does not classify any true negatives, hence there is no specificity mentioned as specificity determines the true negative rate 
+The reported accuracy is 94%
+
+2. Precision and Recall
+
+Calculating Precision and Recall manually -
+
+Formula for Precision is equal to True Positive/(True Positive + False Positive)
+Formula for Recall is equal to True Positive/(True Positive + False Negative)
+
+```{r}
+
+# Calculating Precision: Proportion of Correct Positive Predictions
+precision_score <- 1450 / (1450 + 0)
+
+# Calculating Recall: Proportion of Actual Positives Correctly Identified
+recall_score <- 1450 / (1450 + 74)
+
+# Displaying the Calculated Precision and Recall Scores
+print("The Precision score is:")
+print(precision_score)
+print("The Recall score is:")
+print(recall_score)
+
+```
+
+We can get the values for Precision and Recall by using the byClass object of confusionMatrix
+
+```{r}
+
+# Extracting and Storing Performance Metrics from the Confusion Matrix as a DataFrame
+performance_metrics <- as.data.frame(confusion_matrix_knn$byClass)
+
+# Displaying the DataFrame Containing Performance Metrics
+performance_metrics
+
+
+```
+
+3. ROC Plot
+
+```{r}
+
+# Generating Class Probabilities for Each Test Instance Using the KNN Model
+predicted_probabilities_knn <- predict(knn_model, testing_data, type = "prob")
+
+# Displaying the First Few Rows of the Predicted Probabilities DataFrame
+head(predicted_probabilities_knn)
+
+
+```
+
+Creating the ROC Curve for the KNN model
+
+```{r}
+
+# Building a ROC Curve to Evaluate Model Performance
+roc_curve <- roc(testing_data$stroke, predicted_probabilities_knn[,1])
+
+# Plotting the ROC Curve with Area Under the Curve (AUC) Displayed
+plot(roc_curve, print.auc = TRUE)
+
+
+```
+
+An AUC (Area Under the Curve) of 0.7 suggests that there's a more than 50% chance that the model will rank a randomly chosen positive instance higher than a randomly chosen negative one.
+
+The usefulness of performance evaluation metrics is multifold:
+- The confusion matrix provides a detailed comparison between actual cases and the classifier's predictions, offering insights into the specific areas where the classifier errs.
+- Precision reflects the accuracy of positive predictions, indicating the proportion of instances correctly identified as positive out of all labeled as positive.
+- Recall, or sensitivity, measures the ability of the model to identify all relevant instances, showing the percentage of actual positives that are correctly classified.
+- Depending on the specific model and dataset, we may prioritize different metrics like Precision, Recall, or Specificity to evaluate our model's effectiveness.
+- The ROC curve is valuable for assessing the model's capacity to differentiate between true positives and false positives.
+
+In our scenario, while the accuracy appears high, a deeper dive into these performance metrics reveals that the model is actually biased in classifying only one class effectively, neglecting the other.
+
+## h. Report 
+
+Observing the substantial impact of dataset imbalance was a striking revelation. Without advanced evaluation methods like examining the confusion matrix or ROC curve, we might be misled by high accuracy figures that don't truly reflect the model's performance. Each phase in the pipeline significantly influences the subsequent stages, underscoring the importance of meticulous attention from the outset. Missteps at any stage can potentially compromise the entire model. This experience has underscored the critical importance of every step in the data mining process. To conduct a thorough analysis of this dataset, it's essential to have a balanced distribution in the class label column.
+
+
+## i. Reflection
+
+This course has been enlightening in several ways:
+- It deepened my understanding of various preprocessing methods.
+- It highlighted the significance of both univariate and bivariate data analysis.
+- It provided insights into different classifiers and the underlying principles guiding them.
+
+The section on clustering was particularly fascinating and emerged as my favorite topic. I've always admired intricate data visualizations online and been curious about the creative process behind them. This course not only fueled my interest but also brought me closer to understanding the core concepts of data science. It made me realize that data science isn't just about crafting striking visualizations; it's more about the journey of applying correct methodologies to achieve those results.
+
+
